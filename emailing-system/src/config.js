@@ -42,5 +42,10 @@ export function loadConfig(overrides = {}) {
       cooldownMs: overrides.circuitBreaker?.cooldownMs ?? 60_000,
     },
     templatesDir: overrides.templatesDir || path.join(ROOT, 'templates'),
+    tracking: {
+      enabled: overrides.tracking?.enabled ?? process.env.TRACKING_ENABLED === 'true',
+      baseUrl: overrides.tracking?.baseUrl || process.env.TRACKING_BASE_URL || 'http://localhost:4000',
+      port: overrides.tracking?.port ?? Number(process.env.TRACKING_PORT || 4000),
+    },
   };
 }

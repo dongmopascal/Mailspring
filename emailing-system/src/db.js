@@ -5,6 +5,7 @@ import path from 'node:path';
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS emails (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tracking_id TEXT,
   to_address TEXT NOT NULL,
   from_address TEXT NOT NULL,
   subject TEXT NOT NULL,
@@ -18,10 +19,22 @@ CREATE TABLE IF NOT EXISTS emails (
   smtp_server TEXT,
   message_id TEXT,
   last_error TEXT,
+  opened_at INTEGER,
+  open_count INTEGER NOT NULL DEFAULT 0,
+  click_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_emails_status_next ON emails (status, next_attempt_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_tracking_id ON emails (tracking_id);
+
+CREATE TABLE IF NOT EXISTS clicks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tracking_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  clicked_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_clicks_tracking_id ON clicks (tracking_id);
 `;
 
 export function openDb(dbPath) {

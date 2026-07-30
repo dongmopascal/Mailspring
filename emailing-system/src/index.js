@@ -1,9 +1,13 @@
+import crypto from 'node:crypto';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { Queue, PRIORITY } from './queue.js';
 import { SmtpPool } from './smtpPool.js';
 import { TemplateRenderer } from './templates.js';
 import { Worker } from './worker.js';
+import { TrackingStore } from './trackingStore.js';
+import { injectTracking } from './tracking.js';
+import { startTrackingServer } from './trackingServer.js';
 import { logger } from './logger.js';
 
 export { PRIORITY };
@@ -22,16 +26,25 @@ export function createEmailingSystem(overrides = {}) {
   const smtpPool = new SmtpPool(config.servers, config.circuitBreaker);
   const templates = new TemplateRenderer(config.templatesDir);
   const worker = new Worker(queue, smtpPool, config);
+  const trackingStore = new TrackingStore(db);
+  let trackingServer = null;
 
   function sendEmail({ to, subject, html, text, from, priority = PRIORITY.NORMAL, maxAttempts }) {
+    let finalHtml = html;
+    let trackingId;
+    if (config.tracking.enabled && html) {
+      trackingId = crypto.randomUUID();
+      finalHtml = injectTracking(html, { trackingId, baseUrl: config.tracking.baseUrl });
+    }
     return queue.enqueue({
       to,
       from: from ?? config.fromDefault,
       subject,
-      html,
+      html: finalHtml,
       text,
       priority,
       maxAttempts,
+      trackingId,
     });
   }
 
@@ -51,18 +64,35 @@ export function createEmailingSystem(overrides = {}) {
     });
   }
 
+  async function start() {
+    worker.start();
+    if (config.tracking.enabled && !trackingServer) {
+      trackingServer = await startTrackingServer(trackingStore, config.tracking.port);
+    }
+    logger.info('emailing_system_started', {
+      servers: config.servers.map((s) => s.name),
+      tracking: config.tracking.enabled,
+    });
+  }
+
+  async function stop() {
+    worker.stop();
+    if (trackingServer) {
+      await new Promise((resolve) => trackingServer.close(resolve));
+      trackingServer = null;
+    }
+  }
+
   return {
     config,
     sendEmail,
     sendTemplate,
     sendBulk,
-    start: () => {
-      worker.start();
-      logger.info('emailing_system_started', { servers: config.servers.map((s) => s.name) });
-    },
-    stop: () => worker.stop(),
+    start,
+    stop,
     stats: () => queue.getStats(),
     smtpStatus: () => smtpPool.status(),
-    _internal: { db, queue, smtpPool, templates, worker },
+    trackingStats: () => trackingStore.campaignStats(),
+    _internal: { db, queue, smtpPool, templates, worker, trackingStore },
   };
 }

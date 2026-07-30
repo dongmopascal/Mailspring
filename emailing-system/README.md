@@ -2,9 +2,9 @@
 
 Module Node.js autonome qui envoie des emails via un ou plusieurs serveurs
 SMTP, avec queue persistante, retry/backoff, failover automatique, circuit
-breaker et rate limiting par serveur. C'est la fondation sur laquelle
-viennent se greffer les features suivantes (tracking d'ouverture/clics,
-bounce handling, unsubscribe, A/B testing, etc.).
+breaker, rate limiting par serveur, et tracking d'ouverture/clics. C'est la
+fondation sur laquelle viennent se greffer d'autres features (bounce
+handling, unsubscribe, A/B testing, etc.).
 
 ## Pourquoi ce module et pas juste `nodemailer.sendMail()`
 
@@ -62,10 +62,32 @@ system.sendBulk(
   { subject: 'Newsletter de juillet', template: 'welcome', priority: PRIORITY.NORMAL }
 );
 
-system.start();               // démarre le worker qui vide la queue
-console.log(system.stats());  // { pending, sending, sent, dead }
+await system.start();          // démarre le worker (et le serveur de tracking si activé)
+console.log(system.stats());   // { pending, sending, sent, dead }
 console.log(system.smtpStatus());
 ```
+
+## Tracking d'ouverture et de clics
+
+Active `TRACKING_ENABLED=true` dans `.env` (avec `TRACKING_BASE_URL` pointant
+vers une URL **publiquement accessible**, sinon les emails ouverts depuis une
+vraie boîte mail ne pourront pas contacter ton serveur). Dès qu'un email est
+envoyé avec du HTML :
+
+- un pixel invisible est ajouté (`<img src=".../t/o/<id>.png">`) → une requête
+  dessus marque l'email comme ouvert.
+- chaque lien `<a href="...">` est réécrit pour passer par
+  `.../t/c/<id>?u=...` → le clic est enregistré puis l'utilisateur est
+  redirigé (302) vers l'URL d'origine.
+
+```js
+console.log(system.trackingStats());
+// { totalSent, totalOpened, totalClicks, openRate, clickRate }
+```
+
+Le serveur de tracking tourne dans le même process, démarré par
+`system.start()`. Pour un vrai déploiement, mets-le derrière ton reverse
+proxy / domaine public.
 
 ## Configuration multi-serveurs (failover)
 
@@ -78,13 +100,15 @@ pause automatiquement et le trafic bascule sur le suivant. Voir
 ## Tester sans serveur SMTP réel
 
 ```bash
-npm run test:smoke
+npm test              # les deux tests
+npm run test:smoke     # queue / retry / failover / circuit breaker
+npm run test:tracking  # pixel d'ouverture + tracking de clics
 ```
 
-Ce test simule un serveur SMTP en panne et un serveur de secours (via le
-`jsonTransport` intégré à nodemailer, qui ne se connecte à rien) pour
-prouver que la queue, les retries, le circuit breaker et le failover
-fonctionnent, sans dépendance réseau.
+Ces tests simulent les serveurs SMTP (`jsonTransport` intégré à nodemailer,
+ou un transport qui échoue volontairement) pour prouver que la queue, les
+retries, le circuit breaker, le failover et le tracking fonctionnent, sans
+dépendance réseau externe.
 
 ## Architecture
 
@@ -95,13 +119,15 @@ src/
   queue.js      enqueue / claim / markSent / markFailed / backoff
   smtpPool.js   multi-transport nodemailer, failover, circuit breaker, rate limit
   worker.js     boucle qui vide la queue et appelle le pool SMTP
-  templates.js  rendu Handlebars avec cache
-  index.js      API publique: sendEmail / sendTemplate / sendBulk / start / stop / stats
+  templates.js      rendu Handlebars avec cache
+  tracking.js       injection du pixel d'ouverture + réécriture des liens trackés
+  trackingStore.js  lecture/écriture des opens/clics en base
+  trackingServer.js serveur HTTP qui sert le pixel et redirige les clics trackés
+  index.js          API publique: sendEmail / sendTemplate / sendBulk / start / stop / stats / trackingStats
 ```
 
 ## Prochaines étapes possibles
 
-- Tracking d'ouverture (pixel) et de clics (réécriture de liens)
 - Bounce handling (webhook du fournisseur ou parsing IMAP des NDR)
 - Unsubscribe en un clic + header `List-Unsubscribe`
 - API HTTP + webhooks (`delivered`, `opened`, `clicked`, `bounced`)
