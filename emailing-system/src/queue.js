@@ -10,9 +10,9 @@ export class Queue {
     this.stmts = {
       insert: db.prepare(`
         INSERT INTO emails
-          (campaign_id, tracking_id, to_address, from_address, subject, html, text, headers_json, priority, status,
+          (campaign_id, variant, tracking_id, to_address, from_address, subject, html, text, headers_json, priority, status,
            attempts, max_attempts, next_attempt_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
       `),
       claimable: db.prepare(`
         SELECT id FROM emails
@@ -42,10 +42,11 @@ export class Queue {
     };
   }
 
-  enqueue({ to, from, subject, html, text, priority = PRIORITY.NORMAL, maxAttempts, trackingId, headers, campaignId }) {
+  enqueue({ to, from, subject, html, text, priority = PRIORITY.NORMAL, maxAttempts, trackingId, headers, campaignId, variant }) {
     const now = Date.now();
     const result = this.stmts.insert.run(
       campaignId ?? null,
+      variant ?? null,
       trackingId ?? null,
       to,
       from,

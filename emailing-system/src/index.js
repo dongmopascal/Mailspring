@@ -44,7 +44,7 @@ export function createEmailingSystem(overrides = {}) {
     };
   }
 
-  function sendEmail({ to, subject, html, text, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId }) {
+  function sendEmail({ to, subject, html, text, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId, variant }) {
     if (suppressionList.isSuppressed(to)) {
       logger.warn('email_suppressed', { to });
       return null;
@@ -71,23 +71,64 @@ export function createEmailingSystem(overrides = {}) {
       trackingId,
       headers,
       campaignId,
+      variant,
     });
   }
 
-  function sendTemplate({ to, subject, template, variables, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId }) {
+  function sendTemplate({ to, subject, template, variables, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId, variant }) {
     const html = templates.render(template, variables);
-    return sendEmail({ to, subject, html, from, priority, maxAttempts, campaignId });
+    return sendEmail({ to, subject, html, from, priority, maxAttempts, campaignId, variant });
   }
 
-  function sendBulk(recipients, { subject, template, html, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId, campaignName }) {
+  // Weighted random pick among A/B variants (weight defaults to 1, i.e. even split).
+  function pickVariant(variants) {
+    const totalWeight = variants.reduce((sum, v) => sum + (v.weight ?? 1), 0);
+    let r = Math.random() * totalWeight;
+    for (const v of variants) {
+      r -= v.weight ?? 1;
+      if (r <= 0) return v;
+    }
+    return variants[variants.length - 1];
+  }
+
+  function sendBulk(
+    recipients,
+    { subject, template, html, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId, campaignName, variants }
+  ) {
     const effectiveCampaignId = campaignId ?? (campaignName ? campaignStore.create(campaignName) : undefined);
     return recipients.map((r) => {
-      const variables = typeof r === 'string' ? {} : r.variables ?? {};
+      const recipientVariables = typeof r === 'string' ? {} : r.variables ?? {};
       const to = typeof r === 'string' ? r : r.to;
-      if (template) {
-        return sendTemplate({ to, subject, template, variables, from, priority, maxAttempts, campaignId: effectiveCampaignId });
+
+      const chosen = variants ? pickVariant(variants) : null;
+      const effectiveSubject = chosen?.subject ?? subject;
+      const effectiveHtml = chosen?.html ?? html;
+      const effectiveTemplate = chosen?.template ?? template;
+      const variantName = chosen?.name;
+
+      if (effectiveTemplate) {
+        return sendTemplate({
+          to,
+          subject: effectiveSubject,
+          template: effectiveTemplate,
+          variables: recipientVariables,
+          from,
+          priority,
+          maxAttempts,
+          campaignId: effectiveCampaignId,
+          variant: variantName,
+        });
       }
-      return sendEmail({ to, subject, html, from, priority, maxAttempts, campaignId: effectiveCampaignId });
+      return sendEmail({
+        to,
+        subject: effectiveSubject,
+        html: effectiveHtml,
+        from,
+        priority,
+        maxAttempts,
+        campaignId: effectiveCampaignId,
+        variant: variantName,
+      });
     });
   }
 
@@ -129,6 +170,7 @@ export function createEmailingSystem(overrides = {}) {
     createCampaign: (name) => campaignStore.create(name),
     listCampaigns: () => campaignStore.listWithStats(),
     campaignStats: (campaignId) => campaignStore.stats(campaignId),
+    campaignVariantStats: (campaignId) => campaignStore.statsByVariant(campaignId),
     _internal: { db, queue, smtpPool, templates, worker, trackingStore, suppressionList, campaignStore },
   };
 }

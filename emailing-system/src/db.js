@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
 CREATE TABLE IF NOT EXISTS emails (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   campaign_id INTEGER,
+  variant TEXT,
   tracking_id TEXT,
   to_address TEXT NOT NULL,
   from_address TEXT NOT NULL,

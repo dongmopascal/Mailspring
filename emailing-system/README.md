@@ -3,10 +3,9 @@
 Module Node.js autonome qui envoie des emails via un ou plusieurs serveurs
 SMTP, avec queue persistante, retry/backoff, failover automatique, circuit
 breaker, rate limiting par serveur, tracking d'ouverture/clics, bounce
-handling automatique, unsubscribe en un clic, un dashboard de campagnes et
-des webhooks signés pour notifier ton app en temps réel. C'est la fondation
-sur laquelle viennent se greffer d'autres features (A/B testing, parsing
-IMAP des NDR, etc.).
+handling automatique, unsubscribe en un clic, un dashboard de campagnes,
+des webhooks signés et de l'A/B testing. C'est la fondation sur laquelle
+viennent se greffer d'autres features (parsing IMAP des NDR, etc.).
 
 ## Pourquoi ce module et pas juste `nodemailer.sendMail()`
 
@@ -170,6 +169,31 @@ function verify(rawBody, signature, secret) {
 La livraison est fire-and-forget (3 tentatives avec un léger backoff en cas
 d'échec) : un webhook lent ou down ne bloque jamais l'envoi des emails.
 
+## A/B testing
+
+`sendBulk(..., { variants: [...] })` répartit chaque destinataire
+aléatoirement (pondérable via `weight`) entre plusieurs versions de
+l'email, et tague chaque envoi avec le nom de sa variante :
+
+```js
+system.sendBulk(recipients, {
+  campaignName: 'Relance factures',
+  variants: [
+    { name: 'A - Objet direct', subject: 'Votre facture est prête', html: '<p>...</p>' },
+    { name: 'B - Objet urgence', subject: 'Action requise : facture en attente', html: '<p>...</p>', weight: 1 },
+  ],
+});
+
+console.log(system.campaignVariantStats(campaignId));
+// [{ variant: 'A - ...', sent, opened, clicks, bounced, openRate, clickRate, bounceRate }, { variant: 'B - ...' , ... }]
+```
+
+Une variante peut changer `subject`, `html` ou `template` (ou n'importe
+quelle combinaison — ce qui n'est pas précisé retombe sur la valeur passée
+à `sendBulk`). Le dashboard (`/dashboard`) affiche automatiquement un
+tableau comparatif par campagne dès qu'elle a été envoyée avec plusieurs
+variantes, et annote celle avec le meilleur taux d'ouverture.
+
 ## Configuration multi-serveurs (failover)
 
 Dans `.env`, au lieu de `SMTP_HOST`/`SMTP_USER`/..., définis `SMTP_SERVERS`
@@ -188,14 +212,15 @@ npm run test:bounce       # rejet 5xx -> dead immediat + suppression
 npm run test:unsubscribe  # header List-Unsubscribe + one-click
 npm run test:dashboard    # campagnes + stats agregees + page /dashboard
 npm run test:webhooks     # les 5 evenements arrivent, signature HMAC valide
+npm run test:ab           # repartition A/B + comparaison des taux d'ouverture
 ```
 
 Ces tests simulent les serveurs SMTP (`jsonTransport` intégré à nodemailer,
 ou un transport custom qui échoue/bounce volontairement) pour prouver que
 la queue, les retries, le circuit breaker, le failover, le tracking, le
-bounce handling, l'unsubscribe, les campagnes et les webhooks fonctionnent,
-sans dépendance réseau externe (le test webhooks lance juste un petit
-serveur HTTP local comme récepteur).
+bounce handling, l'unsubscribe, les campagnes, les webhooks et l'A/B testing
+fonctionnent, sans dépendance réseau externe (le test webhooks lance juste
+un petit serveur HTTP local comme récepteur).
 
 ## Architecture
 
@@ -217,10 +242,9 @@ src/
   webhooks.js         livraison HTTP signee (HMAC) des evenements, fire-and-forget avec retry
   index.js            API publique: sendEmail / sendTemplate / sendBulk / start / stop /
                        stats / trackingStats / isSuppressed / suppressionCount /
-                       createCampaign / listCampaigns / campaignStats
+                       createCampaign / listCampaigns / campaignStats / campaignVariantStats
 ```
 
 ## Prochaines étapes possibles
 
-- A/B testing (objet, contenu, expéditeur)
 - Parsing IMAP des NDR pour les fournisseurs sans webhook de bounce

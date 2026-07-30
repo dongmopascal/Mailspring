@@ -20,6 +20,19 @@ export class CampaignStore {
         JOIN emails e ON e.to_address = s.email COLLATE NOCASE
         WHERE e.campaign_id = ? AND s.reason = 'unsubscribe'
       `),
+      statsByVariant: db.prepare(`
+        SELECT
+          variant,
+          COUNT(*) AS total,
+          SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent,
+          SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS bounced,
+          SUM(CASE WHEN opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened,
+          SUM(click_count) AS clicks
+        FROM emails
+        WHERE campaign_id = ? AND variant IS NOT NULL
+        GROUP BY variant
+        ORDER BY variant ASC
+      `),
     };
   }
 
@@ -53,7 +66,38 @@ export class CampaignStore {
     };
   }
 
+  // Only meaningful when a campaign was sent with multiple named variants
+  // (A/B test); returns one row per variant with its own rates so they can
+  // be compared against each other.
+  statsByVariant(campaignId) {
+    return this.stmts.statsByVariant.all(campaignId).map((row) => {
+      const total = row.total ?? 0;
+      const sent = row.sent ?? 0;
+      const bounced = row.bounced ?? 0;
+      const opened = row.opened ?? 0;
+      const clicks = row.clicks ?? 0;
+      return {
+        variant: row.variant,
+        total,
+        sent,
+        bounced,
+        opened,
+        clicks,
+        openRate: sent ? opened / sent : 0,
+        clickRate: sent ? clicks / sent : 0,
+        bounceRate: total ? bounced / total : 0,
+      };
+    });
+  }
+
   listWithStats() {
-    return this.list().map((campaign) => ({ ...campaign, stats: this.stats(campaign.id) }));
+    return this.list().map((campaign) => {
+      const variants = this.statsByVariant(campaign.id);
+      return {
+        ...campaign,
+        stats: this.stats(campaign.id),
+        variants: variants.length > 1 ? variants : [],
+      };
+    });
   }
 }
