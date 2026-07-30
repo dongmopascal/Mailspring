@@ -10,7 +10,8 @@
     "test:bounce": "node test/bounce-smoke.js",
     "test:unsubscribe": "node test/unsubscribe-smoke.js",
     "test:dashboard": "node test/dashboard-smoke.js",
-    "test": "npm run test:smoke && npm run test:tracking && npm run test:bounce && npm run test:unsubscribe && npm run test:dashboard"
+    "test:webhooks": "node test/webhooks-smoke.js",
+    "test": "npm run test:smoke && npm run test:tracking && npm run test:bounce && npm run test:unsubscribe && npm run test:dashboard && npm run test:webhooks"
   },
   "engines": {
     "node": ">=22.5.0"

@@ -10,7 +10,7 @@ const TRANSPARENT_PIXEL = Buffer.from(
 const UNSUBSCRIBE_PAGE =
   "<html><body><p>Vous avez bien ete desinscrit(e). Vous ne recevrez plus d'emails de notre part.</p></body></html>";
 
-export function createTrackingServer(trackingStore, suppressionList, campaignStore) {
+export function createTrackingServer(trackingStore, suppressionList, campaignStore, webhooks) {
   return http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
 
@@ -28,6 +28,7 @@ export function createTrackingServer(trackingStore, suppressionList, campaignSto
       const trackingId = openMatch[1];
       if (trackingStore.isKnownTrackingId(trackingId)) {
         trackingStore.markOpened(trackingId);
+        webhooks.emit('email.opened', { trackingId, to: trackingStore.getRecipient(trackingId) });
       }
       res.writeHead(200, {
         'Content-Type': 'image/png',
@@ -49,6 +50,7 @@ export function createTrackingServer(trackingStore, suppressionList, campaignSto
       }
       if (trackingStore.isKnownTrackingId(trackingId)) {
         trackingStore.recordClick(trackingId, target);
+        webhooks.emit('email.clicked', { trackingId, to: trackingStore.getRecipient(trackingId), url: target });
       }
       res.writeHead(302, { Location: target });
       res.end();
@@ -66,6 +68,7 @@ export function createTrackingServer(trackingStore, suppressionList, campaignSto
       if (email) {
         suppressionList.add(email, 'unsubscribe');
         logger.info('email_unsubscribed', { trackingId, email });
+        webhooks.emit('email.unsubscribed', { trackingId, to: email });
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(UNSUBSCRIBE_PAGE);
@@ -77,8 +80,8 @@ export function createTrackingServer(trackingStore, suppressionList, campaignSto
   });
 }
 
-export function startTrackingServer(trackingStore, suppressionList, campaignStore, port) {
-  const server = createTrackingServer(trackingStore, suppressionList, campaignStore);
+export function startTrackingServer(trackingStore, suppressionList, campaignStore, webhooks, port) {
+  const server = createTrackingServer(trackingStore, suppressionList, campaignStore, webhooks);
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, () => {

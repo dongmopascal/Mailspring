@@ -64,5 +64,10 @@ export function loadConfig(overrides = {}) {
     dashboard: {
       enabled: overrides.dashboard?.enabled ?? process.env.DASHBOARD_ENABLED === 'true',
     },
+    webhooks: {
+      enabled: overrides.webhooks?.enabled ?? process.env.WEBHOOKS_ENABLED === 'true',
+      url: overrides.webhooks?.url || process.env.WEBHOOK_URL || undefined,
+      secret: overrides.webhooks?.secret || process.env.WEBHOOK_SECRET || undefined,
+    },
   };
 }

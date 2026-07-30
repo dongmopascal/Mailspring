@@ -2,10 +2,11 @@ import { logger } from './logger.js';
 import { isPermanentFailure } from './bounceClassifier.js';
 
 export class Worker {
-  constructor(queue, smtpPool, suppressionList, { pollIntervalMs, batchSize }) {
+  constructor(queue, smtpPool, suppressionList, webhooks, { pollIntervalMs, batchSize }) {
     this.queue = queue;
     this.smtpPool = smtpPool;
     this.suppressionList = suppressionList;
+    this.webhooks = webhooks;
     this.pollIntervalMs = pollIntervalMs;
     this.batchSize = batchSize;
     this._timer = null;
@@ -55,6 +56,13 @@ export class Worker {
       if (result.ok) {
         this.queue.markSent(job.id, { messageId: result.messageId, smtpServer: result.serverName });
         logger.info('email_sent', { id: job.id, to: job.to_address, server: result.serverName });
+        this.webhooks.emit('email.sent', {
+          id: job.id,
+          to: job.to_address,
+          campaignId: job.campaign_id,
+          messageId: result.messageId,
+          server: result.serverName,
+        });
         continue;
       }
 
@@ -76,6 +84,13 @@ export class Worker {
           responseCode: result.error?.responseCode,
           attempts: outcome.attempts,
         });
+        this.webhooks.emit('email.bounced', {
+          id: job.id,
+          to: job.to_address,
+          campaignId: job.campaign_id,
+          responseCode: result.error?.responseCode,
+          error: result.error?.message ?? String(result.error),
+        });
         continue;
       }
 
@@ -92,6 +107,15 @@ export class Worker {
         attempts: outcome.attempts,
         retryInMs: outcome.retryInMs,
       });
+      if (outcome.dead) {
+        this.webhooks.emit('email.failed', {
+          id: job.id,
+          to: job.to_address,
+          campaignId: job.campaign_id,
+          attempts: outcome.attempts,
+          error: result.error?.message ?? String(result.error),
+        });
+      }
     }
   }
 }

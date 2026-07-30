@@ -8,6 +8,7 @@ import { Worker } from './worker.js';
 import { TrackingStore } from './trackingStore.js';
 import { SuppressionList } from './suppressionList.js';
 import { CampaignStore } from './campaigns.js';
+import { WebhookEmitter } from './webhooks.js';
 import { injectTracking } from './tracking.js';
 import { startTrackingServer } from './trackingServer.js';
 import { logger } from './logger.js';
@@ -30,7 +31,8 @@ export function createEmailingSystem(overrides = {}) {
   const trackingStore = new TrackingStore(db);
   const suppressionList = new SuppressionList(db);
   const campaignStore = new CampaignStore(db);
-  const worker = new Worker(queue, smtpPool, suppressionList, config);
+  const webhooks = new WebhookEmitter(config.webhooks);
+  const worker = new Worker(queue, smtpPool, suppressionList, webhooks, config);
   let publicServer = null;
 
   function buildUnsubscribeHeaders(trackingId) {
@@ -93,13 +95,14 @@ export function createEmailingSystem(overrides = {}) {
     worker.start();
     const needsServer = config.tracking.enabled || config.unsubscribe.enabled || config.dashboard.enabled;
     if (needsServer && !publicServer) {
-      publicServer = await startTrackingServer(trackingStore, suppressionList, campaignStore, config.publicServerPort);
+      publicServer = await startTrackingServer(trackingStore, suppressionList, campaignStore, webhooks, config.publicServerPort);
     }
     logger.info('emailing_system_started', {
       servers: config.servers.map((s) => s.name),
       tracking: config.tracking.enabled,
       unsubscribe: config.unsubscribe.enabled,
       dashboard: config.dashboard.enabled,
+      webhooks: config.webhooks.enabled,
     });
   }
 

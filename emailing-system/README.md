@@ -3,9 +3,10 @@
 Module Node.js autonome qui envoie des emails via un ou plusieurs serveurs
 SMTP, avec queue persistante, retry/backoff, failover automatique, circuit
 breaker, rate limiting par serveur, tracking d'ouverture/clics, bounce
-handling automatique, unsubscribe en un clic et un dashboard de campagnes.
-C'est la fondation sur laquelle viennent se greffer d'autres features
-(A/B testing, API + webhooks, etc.).
+handling automatique, unsubscribe en un clic, un dashboard de campagnes et
+des webhooks signés pour notifier ton app en temps réel. C'est la fondation
+sur laquelle viennent se greffer d'autres features (A/B testing, parsing
+IMAP des NDR, etc.).
 
 ## Pourquoi ce module et pas juste `nodemailer.sendMail()`
 
@@ -142,6 +143,33 @@ le même serveur HTTP que le tracking/unsubscribe) qui liste toutes les
 campagnes avec ces métriques dans un tableau — pratique pour un coup d'oeil
 rapide sans écrire de requête SQL.
 
+## Webhooks
+
+Active `WEBHOOKS_ENABLED=true` avec `WEBHOOK_URL` (et idéalement
+`WEBHOOK_SECRET`) pour que ton application soit notifiée en temps réel de
+chaque événement, sans avoir à interroger la base :
+
+- `email.sent`, `email.bounced`, `email.failed` (émis par le worker)
+- `email.opened`, `email.clicked`, `email.unsubscribed` (émis par le serveur
+  de tracking)
+
+Chaque requête est un `POST` JSON `{ event, timestamp, data }`, avec un
+header `X-Webhook-Signature` (HMAC-SHA256 du corps brut, avec
+`WEBHOOK_SECRET`) — vérifie-le côté receveur pour t'assurer que la requête
+vient bien d'ici et pas d'un tiers qui aurait deviné l'URL :
+
+```js
+import crypto from 'node:crypto';
+
+function verify(rawBody, signature, secret) {
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  return signature === expected;
+}
+```
+
+La livraison est fire-and-forget (3 tentatives avec un léger backoff en cas
+d'échec) : un webhook lent ou down ne bloque jamais l'envoi des emails.
+
 ## Configuration multi-serveurs (failover)
 
 Dans `.env`, au lieu de `SMTP_HOST`/`SMTP_USER`/..., définis `SMTP_SERVERS`
@@ -159,13 +187,15 @@ npm run test:tracking     # pixel d'ouverture + tracking de clics
 npm run test:bounce       # rejet 5xx -> dead immediat + suppression
 npm run test:unsubscribe  # header List-Unsubscribe + one-click
 npm run test:dashboard    # campagnes + stats agregees + page /dashboard
+npm run test:webhooks     # les 5 evenements arrivent, signature HMAC valide
 ```
 
 Ces tests simulent les serveurs SMTP (`jsonTransport` intégré à nodemailer,
 ou un transport custom qui échoue/bounce volontairement) pour prouver que
 la queue, les retries, le circuit breaker, le failover, le tracking, le
-bounce handling, l'unsubscribe et les campagnes fonctionnent, sans
-dépendance réseau externe.
+bounce handling, l'unsubscribe, les campagnes et les webhooks fonctionnent,
+sans dépendance réseau externe (le test webhooks lance juste un petit
+serveur HTTP local comme récepteur).
 
 ## Architecture
 
@@ -184,6 +214,7 @@ src/
   suppressionList.js  liste des adresses a ne plus jamais contacter (bounce/unsubscribe)
   campaigns.js        regroupement des envois en campagnes + stats agregees
   dashboard.js        rendu HTML de la page /dashboard
+  webhooks.js         livraison HTTP signee (HMAC) des evenements, fire-and-forget avec retry
   index.js            API publique: sendEmail / sendTemplate / sendBulk / start / stop /
                        stats / trackingStats / isSuppressed / suppressionCount /
                        createCampaign / listCampaigns / campaignStats
@@ -191,6 +222,5 @@ src/
 
 ## Prochaines étapes possibles
 
-- API HTTP + webhooks (`delivered`, `opened`, `clicked`, `bounced`, `unsubscribed`)
 - A/B testing (objet, contenu, expéditeur)
 - Parsing IMAP des NDR pour les fournisseurs sans webhook de bounce
