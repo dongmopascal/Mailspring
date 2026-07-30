@@ -21,7 +21,8 @@ const system = createEmailingSystem({
   servers: [{ name: 'working', customTransport: nodemailer.createTransport({ jsonTransport: true }), maxPerMinute: 1000 }],
   pollIntervalMs: 100,
   batchSize: 5,
-  tracking: { enabled: true, baseUrl: `http://localhost:${TRACKING_PORT}`, port: TRACKING_PORT },
+  tracking: { enabled: true, baseUrl: `http://localhost:${TRACKING_PORT}` },
+  publicServerPort: TRACKING_PORT,
 });
 
 const TARGET_URL = 'https://example.com/promo?ref=newsletter';

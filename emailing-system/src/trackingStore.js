@@ -9,6 +9,7 @@ export class TrackingStore {
       insertClick: db.prepare(`INSERT INTO clicks (tracking_id, url, clicked_at) VALUES (?, ?, ?)`),
       bumpClickCount: db.prepare(`UPDATE emails SET click_count = click_count + 1 WHERE tracking_id = ?`),
       exists: db.prepare(`SELECT 1 FROM emails WHERE tracking_id = ?`),
+      getRecipient: db.prepare(`SELECT to_address FROM emails WHERE tracking_id = ?`),
       campaignStats: db.prepare(`
         SELECT
           COUNT(*) AS total_sent,
@@ -22,6 +23,10 @@ export class TrackingStore {
 
   isKnownTrackingId(trackingId) {
     return Boolean(this.stmts.exists.get(trackingId));
+  }
+
+  getRecipient(trackingId) {
+    return this.stmts.getRecipient.get(trackingId)?.to_address ?? null;
   }
 
   markOpened(trackingId) {

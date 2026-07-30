@@ -10,9 +10,9 @@ export class Queue {
     this.stmts = {
       insert: db.prepare(`
         INSERT INTO emails
-          (tracking_id, to_address, from_address, subject, html, text, priority, status,
+          (tracking_id, to_address, from_address, subject, html, text, headers_json, priority, status,
            attempts, max_attempts, next_attempt_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
       `),
       claimable: db.prepare(`
         SELECT id FROM emails
@@ -42,7 +42,7 @@ export class Queue {
     };
   }
 
-  enqueue({ to, from, subject, html, text, priority = PRIORITY.NORMAL, maxAttempts, trackingId }) {
+  enqueue({ to, from, subject, html, text, priority = PRIORITY.NORMAL, maxAttempts, trackingId, headers }) {
     const now = Date.now();
     const result = this.stmts.insert.run(
       trackingId ?? null,
@@ -51,6 +51,7 @@ export class Queue {
       subject,
       html ?? null,
       text ?? null,
+      headers ? JSON.stringify(headers) : null,
       priority,
       maxAttempts ?? this.maxAttemptsDefault,
       now,
@@ -90,6 +91,13 @@ export class Queue {
     const delay = this.backoffFor(attempts);
     this.stmts.markRetry.run(attempts, now + delay, String(error), now, id);
     return { dead: false, attempts, retryInMs: delay };
+  }
+
+  // A permanent SMTP rejection (5xx): no point retrying, mark dead right away.
+  markBounced(id, { error, currentAttempts }) {
+    const attempts = currentAttempts + 1;
+    this.stmts.markDead.run(attempts, String(error), Date.now(), id);
+    return { dead: true, attempts, bounced: true };
   }
 
   // Puts a job back to pending without counting it as a failed attempt.

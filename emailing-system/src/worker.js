@@ -1,9 +1,11 @@
 import { logger } from './logger.js';
+import { isPermanentFailure } from './bounceClassifier.js';
 
 export class Worker {
-  constructor(queue, smtpPool, { pollIntervalMs, batchSize }) {
+  constructor(queue, smtpPool, suppressionList, { pollIntervalMs, batchSize }) {
     this.queue = queue;
     this.smtpPool = smtpPool;
+    this.suppressionList = suppressionList;
     this.pollIntervalMs = pollIntervalMs;
     this.batchSize = batchSize;
     this._timer = null;
@@ -44,6 +46,9 @@ export class Worker {
         html: job.html ?? undefined,
         text: job.text ?? undefined,
       };
+      if (job.headers_json) {
+        mailOptions.headers = JSON.parse(job.headers_json);
+      }
 
       const result = await this.smtpPool.send(mailOptions);
 
@@ -55,6 +60,22 @@ export class Worker {
 
       if (result.noCapacity) {
         this.queue.releaseWithoutPenalty(job.id);
+        continue;
+      }
+
+      if (isPermanentFailure(result.error)) {
+        const outcome = this.queue.markBounced(job.id, {
+          error: result.error?.message ?? String(result.error),
+          currentAttempts: job.attempts,
+        });
+        this.suppressionList.add(job.to_address, 'bounce');
+        logger.warn('email_bounced', {
+          id: job.id,
+          to: job.to_address,
+          server: result.serverName,
+          responseCode: result.error?.responseCode,
+          attempts: outcome.attempts,
+        });
         continue;
       }
 

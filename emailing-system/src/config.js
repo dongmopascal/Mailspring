@@ -42,10 +42,24 @@ export function loadConfig(overrides = {}) {
       cooldownMs: overrides.circuitBreaker?.cooldownMs ?? 60_000,
     },
     templatesDir: overrides.templatesDir || path.join(ROOT, 'templates'),
+    // Single HTTP server shared by the open/click-tracking pixel+redirects
+    // and the one-click unsubscribe endpoint - one port regardless of which
+    // of those features are enabled.
+    publicServerPort:
+      overrides.publicServerPort ?? Number(process.env.PUBLIC_SERVER_PORT || process.env.TRACKING_PORT || 4000),
     tracking: {
       enabled: overrides.tracking?.enabled ?? process.env.TRACKING_ENABLED === 'true',
       baseUrl: overrides.tracking?.baseUrl || process.env.TRACKING_BASE_URL || 'http://localhost:4000',
-      port: overrides.tracking?.port ?? Number(process.env.TRACKING_PORT || 4000),
+    },
+    unsubscribe: {
+      enabled: overrides.unsubscribe?.enabled ?? process.env.UNSUBSCRIBE_ENABLED === 'true',
+      baseUrl:
+        overrides.unsubscribe?.baseUrl ||
+        process.env.UNSUBSCRIBE_BASE_URL ||
+        overrides.tracking?.baseUrl ||
+        process.env.TRACKING_BASE_URL ||
+        'http://localhost:4000',
+      mailto: overrides.unsubscribe?.mailto || process.env.UNSUBSCRIBE_MAILTO || undefined,
     },
   };
 }

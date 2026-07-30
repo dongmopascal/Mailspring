@@ -7,7 +7,9 @@
   "scripts": {
     "test:smoke": "node test/smoke.js",
     "test:tracking": "node test/tracking-smoke.js",
-    "test": "npm run test:smoke && npm run test:tracking"
+    "test:bounce": "node test/bounce-smoke.js",
+    "test:unsubscribe": "node test/unsubscribe-smoke.js",
+    "test": "npm run test:smoke && npm run test:tracking && npm run test:bounce && npm run test:unsubscribe"
   },
   "engines": {
     "node": ">=22.5.0"

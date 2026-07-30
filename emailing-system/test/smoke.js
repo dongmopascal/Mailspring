@@ -26,7 +26,7 @@ const system = createEmailingSystem({
   dbPath,
   fromDefault: 'no-reply@example.com',
   servers: [
-    { name: 'primary-broken', customTransport: brokenTransport, maxPerMinute: 1000 },
+    { name: 'primary-broken', customTransport: nodemailer.createTransport(brokenTransport), maxPerMinute: 1000 },
     { name: 'backup-working', customTransport: nodemailer.createTransport({ jsonTransport: true }), maxPerMinute: 1000 },
   ],
   pollIntervalMs: 150,

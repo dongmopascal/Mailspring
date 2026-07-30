@@ -6,6 +6,7 @@ import { SmtpPool } from './smtpPool.js';
 import { TemplateRenderer } from './templates.js';
 import { Worker } from './worker.js';
 import { TrackingStore } from './trackingStore.js';
+import { SuppressionList } from './suppressionList.js';
 import { injectTracking } from './tracking.js';
 import { startTrackingServer } from './trackingServer.js';
 import { logger } from './logger.js';
@@ -25,17 +26,36 @@ export function createEmailingSystem(overrides = {}) {
   const queue = new Queue(db, config);
   const smtpPool = new SmtpPool(config.servers, config.circuitBreaker);
   const templates = new TemplateRenderer(config.templatesDir);
-  const worker = new Worker(queue, smtpPool, config);
   const trackingStore = new TrackingStore(db);
-  let trackingServer = null;
+  const suppressionList = new SuppressionList(db);
+  const worker = new Worker(queue, smtpPool, suppressionList, config);
+  let publicServer = null;
+
+  function buildUnsubscribeHeaders(trackingId) {
+    const unsubUrl = `${config.unsubscribe.baseUrl}/u/${trackingId}`;
+    const targets = config.unsubscribe.mailto ? [`<mailto:${config.unsubscribe.mailto}>`, `<${unsubUrl}>`] : [`<${unsubUrl}>`];
+    return {
+      'List-Unsubscribe': targets.join(', '),
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    };
+  }
 
   function sendEmail({ to, subject, html, text, from, priority = PRIORITY.NORMAL, maxAttempts }) {
-    let finalHtml = html;
-    let trackingId;
-    if (config.tracking.enabled && html) {
-      trackingId = crypto.randomUUID();
-      finalHtml = injectTracking(html, { trackingId, baseUrl: config.tracking.baseUrl });
+    if (suppressionList.isSuppressed(to)) {
+      logger.warn('email_suppressed', { to });
+      return null;
     }
+
+    const needsPublicId = config.tracking.enabled || config.unsubscribe.enabled;
+    const trackingId = needsPublicId ? crypto.randomUUID() : undefined;
+
+    let finalHtml = html;
+    if (config.tracking.enabled && html) {
+      finalHtml = injectTracking(finalHtml, { trackingId, baseUrl: config.tracking.baseUrl });
+    }
+
+    const headers = config.unsubscribe.enabled ? buildUnsubscribeHeaders(trackingId) : undefined;
+
     return queue.enqueue({
       to,
       from: from ?? config.fromDefault,
@@ -45,6 +65,7 @@ export function createEmailingSystem(overrides = {}) {
       priority,
       maxAttempts,
       trackingId,
+      headers,
     });
   }
 
@@ -66,20 +87,21 @@ export function createEmailingSystem(overrides = {}) {
 
   async function start() {
     worker.start();
-    if (config.tracking.enabled && !trackingServer) {
-      trackingServer = await startTrackingServer(trackingStore, config.tracking.port);
+    if ((config.tracking.enabled || config.unsubscribe.enabled) && !publicServer) {
+      publicServer = await startTrackingServer(trackingStore, suppressionList, config.publicServerPort);
     }
     logger.info('emailing_system_started', {
       servers: config.servers.map((s) => s.name),
       tracking: config.tracking.enabled,
+      unsubscribe: config.unsubscribe.enabled,
     });
   }
 
   async function stop() {
     worker.stop();
-    if (trackingServer) {
-      await new Promise((resolve) => trackingServer.close(resolve));
-      trackingServer = null;
+    if (publicServer) {
+      await new Promise((resolve) => publicServer.close(resolve));
+      publicServer = null;
     }
   }
 
@@ -93,6 +115,8 @@ export function createEmailingSystem(overrides = {}) {
     stats: () => queue.getStats(),
     smtpStatus: () => smtpPool.status(),
     trackingStats: () => trackingStore.campaignStats(),
-    _internal: { db, queue, smtpPool, templates, worker, trackingStore },
+    isSuppressed: (email) => suppressionList.isSuppressed(email),
+    suppressionCount: () => suppressionList.count(),
+    _internal: { db, queue, smtpPool, templates, worker, trackingStore, suppressionList },
   };
 }

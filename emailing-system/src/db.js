@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS emails (
   opened_at INTEGER,
   open_count INTEGER NOT NULL DEFAULT 0,
   click_count INTEGER NOT NULL DEFAULT 0,
+  headers_json TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -35,6 +36,12 @@ CREATE TABLE IF NOT EXISTS clicks (
   clicked_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_clicks_tracking_id ON clicks (tracking_id);
+
+CREATE TABLE IF NOT EXISTS suppressions (
+  email TEXT PRIMARY KEY COLLATE NOCASE,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 `;
 
 export function openDb(dbPath) {

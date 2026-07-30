@@ -15,6 +15,10 @@ export class SmtpPool {
     this.servers = servers.map((cfg) => ({
       name: cfg.name,
       maxPerMinute: cfg.maxPerMinute ?? 60,
+      // customTransport must already be a nodemailer transporter (i.e. the
+      // result of nodemailer.createTransport(...)), not a raw transport
+      // plugin - a raw plugin only has .send(), not the .sendMail() this
+      // pool calls.
       transporter: cfg.customTransport ?? nodemailer.createTransport(cfg),
       consecutiveFailures: 0,
       downUntil: 0,

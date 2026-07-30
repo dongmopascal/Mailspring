@@ -2,9 +2,9 @@
 
 Module Node.js autonome qui envoie des emails via un ou plusieurs serveurs
 SMTP, avec queue persistante, retry/backoff, failover automatique, circuit
-breaker, rate limiting par serveur, et tracking d'ouverture/clics. C'est la
-fondation sur laquelle viennent se greffer d'autres features (bounce
-handling, unsubscribe, A/B testing, etc.).
+breaker, rate limiting par serveur, tracking d'ouverture/clics, bounce
+handling automatique et unsubscribe en un clic. C'est la fondation sur
+laquelle viennent se greffer d'autres features (A/B testing, dashboard, etc.).
 
 ## Pourquoi ce module et pas juste `nodemailer.sendMail()`
 
@@ -89,6 +89,38 @@ Le serveur de tracking tourne dans le même process, démarré par
 `system.start()`. Pour un vrai déploiement, mets-le derrière ton reverse
 proxy / domaine public.
 
+## Bounce handling (rejets définitifs)
+
+Quand le serveur SMTP répond avec un code **5xx** (ex: `550 no such user`),
+c'est définitif : réessayer ne servira jamais à rien. Le worker détecte ces
+rejets (`error.responseCode` entre 500 et 599, exposé par nodemailer) et :
+
+- marque l'email `dead` immédiatement, sans consommer le budget de retry ;
+- ajoute automatiquement le destinataire à une **liste de suppression**
+  (`suppressions` en base).
+
+Toute tentative d'envoi ultérieure vers une adresse suppressed est bloquée
+**avant** même de toucher la queue ou le SMTP :
+
+```js
+system.sendEmail({ to: 'adresse-qui-a-bounce@example.com', ... }); // renvoie null, rien n'est envoye
+system.isSuppressed('adresse-qui-a-bounce@example.com'); // true
+```
+
+Un rejet **4xx** (boîte pleine, greylisting...) reste traité comme transitoire
+et suit le retry/backoff normal.
+
+## Unsubscribe en un clic
+
+Active `UNSUBSCRIBE_ENABLED=true` dans `.env`. Chaque email envoyé reçoit
+alors les headers `List-Unsubscribe` et `List-Unsubscribe-Post` (exigés par
+Gmail/Yahoo depuis 2024 pour les envois en masse), pointant vers le même
+serveur HTTP que le tracking. Un clic (ou le one-click POST automatique
+déclenché par le client mail) ajoute le destinataire à la même liste de
+suppression que le bounce handling — les deux mécanismes protègent contre
+le même risque : continuer à écrire à quelqu'un qui ne veut plus recevoir
+tes emails.
+
 ## Configuration multi-serveurs (failover)
 
 Dans `.env`, au lieu de `SMTP_HOST`/`SMTP_USER`/..., définis `SMTP_SERVERS`
@@ -100,15 +132,18 @@ pause automatiquement et le trafic bascule sur le suivant. Voir
 ## Tester sans serveur SMTP réel
 
 ```bash
-npm test              # les deux tests
-npm run test:smoke     # queue / retry / failover / circuit breaker
-npm run test:tracking  # pixel d'ouverture + tracking de clics
+npm test                  # tous les tests
+npm run test:smoke        # queue / retry / failover / circuit breaker
+npm run test:tracking     # pixel d'ouverture + tracking de clics
+npm run test:bounce       # rejet 5xx -> dead immediat + suppression
+npm run test:unsubscribe  # header List-Unsubscribe + one-click
 ```
 
 Ces tests simulent les serveurs SMTP (`jsonTransport` intégré à nodemailer,
-ou un transport qui échoue volontairement) pour prouver que la queue, les
-retries, le circuit breaker, le failover et le tracking fonctionnent, sans
-dépendance réseau externe.
+ou un transport custom qui échoue/bounce volontairement) pour prouver que
+la queue, les retries, le circuit breaker, le failover, le tracking, le
+bounce handling et l'unsubscribe fonctionnent, sans dépendance réseau
+externe.
 
 ## Architecture
 
@@ -119,16 +154,19 @@ src/
   queue.js      enqueue / claim / markSent / markFailed / backoff
   smtpPool.js   multi-transport nodemailer, failover, circuit breaker, rate limit
   worker.js     boucle qui vide la queue et appelle le pool SMTP
-  templates.js      rendu Handlebars avec cache
-  tracking.js       injection du pixel d'ouverture + réécriture des liens trackés
-  trackingStore.js  lecture/écriture des opens/clics en base
-  trackingServer.js serveur HTTP qui sert le pixel et redirige les clics trackés
-  index.js          API publique: sendEmail / sendTemplate / sendBulk / start / stop / stats / trackingStats
+  templates.js        rendu Handlebars avec cache
+  tracking.js         injection du pixel d'ouverture + réécriture des liens trackés
+  trackingStore.js    lecture/écriture des opens/clics en base
+  trackingServer.js   serveur HTTP: pixel, redirection de clics, unsubscribe
+  bounceClassifier.js classe une erreur SMTP en permanente (5xx) ou transitoire
+  suppressionList.js  liste des adresses a ne plus jamais contacter (bounce/unsubscribe)
+  index.js            API publique: sendEmail / sendTemplate / sendBulk / start / stop /
+                       stats / trackingStats / isSuppressed / suppressionCount
 ```
 
 ## Prochaines étapes possibles
 
-- Bounce handling (webhook du fournisseur ou parsing IMAP des NDR)
-- Unsubscribe en un clic + header `List-Unsubscribe`
-- API HTTP + webhooks (`delivered`, `opened`, `clicked`, `bounced`)
+- API HTTP + webhooks (`delivered`, `opened`, `clicked`, `bounced`, `unsubscribed`)
 - Dashboard de campagne (taux d'ouverture, clics, désinscriptions)
+- A/B testing (objet, contenu, expéditeur)
+- Parsing IMAP des NDR pour les fournisseurs sans webhook de bounce
