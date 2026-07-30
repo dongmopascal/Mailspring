@@ -3,8 +3,9 @@
 Module Node.js autonome qui envoie des emails via un ou plusieurs serveurs
 SMTP, avec queue persistante, retry/backoff, failover automatique, circuit
 breaker, rate limiting par serveur, tracking d'ouverture/clics, bounce
-handling automatique et unsubscribe en un clic. C'est la fondation sur
-laquelle viennent se greffer d'autres features (A/B testing, dashboard, etc.).
+handling automatique, unsubscribe en un clic et un dashboard de campagnes.
+C'est la fondation sur laquelle viennent se greffer d'autres features
+(A/B testing, API + webhooks, etc.).
 
 ## Pourquoi ce module et pas juste `nodemailer.sendMail()`
 
@@ -56,10 +57,10 @@ system.sendTemplate({
   variables: { name: 'Alice', email: 'user@example.com' },
 });
 
-// Envoi en masse (newsletter)
+// Envoi en masse (newsletter), groupe automatiquement sous une campagne
 system.sendBulk(
   [{ to: 'a@example.com', variables: { name: 'A' } }, { to: 'b@example.com', variables: { name: 'B' } }],
-  { subject: 'Newsletter de juillet', template: 'welcome', priority: PRIORITY.NORMAL }
+  { subject: 'Newsletter de juillet', template: 'welcome', priority: PRIORITY.NORMAL, campaignName: 'Newsletter Juillet' }
 );
 
 await system.start();          // démarre le worker (et le serveur de tracking si activé)
@@ -121,6 +122,26 @@ suppression que le bounce handling — les deux mécanismes protègent contre
 le même risque : continuer à écrire à quelqu'un qui ne veut plus recevoir
 tes emails.
 
+## Campagnes et dashboard
+
+`sendBulk(..., { campaignName: 'Newsletter Juillet' })` crée automatiquement
+une campagne et y rattache tous les emails envoyés (ou passe un `campaignId`
+existant pour regrouper plusieurs envois sous la même campagne). Chaque
+email — y compris ceux envoyés via `sendEmail`/`sendTemplate` avec un
+`campaignId` explicite — remonte alors dans les stats de sa campagne :
+envoyés, ouverts, clics, bounces, désinscrits.
+
+```js
+const stats = system.campaignStats(campaignId);
+// { total, sent, bounced, opened, clicks, unsubscribed, openRate, clickRate, bounceRate }
+console.log(system.listCampaigns()); // toutes les campagnes + leurs stats
+```
+
+Active `DASHBOARD_ENABLED=true` pour exposer une page **`/dashboard`** (sur
+le même serveur HTTP que le tracking/unsubscribe) qui liste toutes les
+campagnes avec ces métriques dans un tableau — pratique pour un coup d'oeil
+rapide sans écrire de requête SQL.
+
 ## Configuration multi-serveurs (failover)
 
 Dans `.env`, au lieu de `SMTP_HOST`/`SMTP_USER`/..., définis `SMTP_SERVERS`
@@ -137,13 +158,14 @@ npm run test:smoke        # queue / retry / failover / circuit breaker
 npm run test:tracking     # pixel d'ouverture + tracking de clics
 npm run test:bounce       # rejet 5xx -> dead immediat + suppression
 npm run test:unsubscribe  # header List-Unsubscribe + one-click
+npm run test:dashboard    # campagnes + stats agregees + page /dashboard
 ```
 
 Ces tests simulent les serveurs SMTP (`jsonTransport` intégré à nodemailer,
 ou un transport custom qui échoue/bounce volontairement) pour prouver que
 la queue, les retries, le circuit breaker, le failover, le tracking, le
-bounce handling et l'unsubscribe fonctionnent, sans dépendance réseau
-externe.
+bounce handling, l'unsubscribe et les campagnes fonctionnent, sans
+dépendance réseau externe.
 
 ## Architecture
 
@@ -160,13 +182,15 @@ src/
   trackingServer.js   serveur HTTP: pixel, redirection de clics, unsubscribe
   bounceClassifier.js classe une erreur SMTP en permanente (5xx) ou transitoire
   suppressionList.js  liste des adresses a ne plus jamais contacter (bounce/unsubscribe)
+  campaigns.js        regroupement des envois en campagnes + stats agregees
+  dashboard.js        rendu HTML de la page /dashboard
   index.js            API publique: sendEmail / sendTemplate / sendBulk / start / stop /
-                       stats / trackingStats / isSuppressed / suppressionCount
+                       stats / trackingStats / isSuppressed / suppressionCount /
+                       createCampaign / listCampaigns / campaignStats
 ```
 
 ## Prochaines étapes possibles
 
 - API HTTP + webhooks (`delivered`, `opened`, `clicked`, `bounced`, `unsubscribed`)
-- Dashboard de campagne (taux d'ouverture, clics, désinscriptions)
 - A/B testing (objet, contenu, expéditeur)
 - Parsing IMAP des NDR pour les fournisseurs sans webhook de bounce

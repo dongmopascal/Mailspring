@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { logger } from './logger.js';
+import { renderDashboardHtml } from './dashboard.js';
 
 const TRANSPARENT_PIXEL = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -9,9 +10,18 @@ const TRANSPARENT_PIXEL = Buffer.from(
 const UNSUBSCRIBE_PAGE =
   "<html><body><p>Vous avez bien ete desinscrit(e). Vous ne recevrez plus d'emails de notre part.</p></body></html>";
 
-export function createTrackingServer(trackingStore, suppressionList) {
+export function createTrackingServer(trackingStore, suppressionList, campaignStore) {
   return http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
+
+    if (url.pathname === '/dashboard' && req.method === 'GET') {
+      const html = renderDashboardHtml(campaignStore.listWithStats(), {
+        suppressionCount: suppressionList.count(),
+      });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
+      return;
+    }
 
     const openMatch = url.pathname.match(/^\/t\/o\/([^/]+)\.png$/);
     if (openMatch) {
@@ -67,8 +77,8 @@ export function createTrackingServer(trackingStore, suppressionList) {
   });
 }
 
-export function startTrackingServer(trackingStore, suppressionList, port) {
-  const server = createTrackingServer(trackingStore, suppressionList);
+export function startTrackingServer(trackingStore, suppressionList, campaignStore, port) {
+  const server = createTrackingServer(trackingStore, suppressionList, campaignStore);
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, () => {

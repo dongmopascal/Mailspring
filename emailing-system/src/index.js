@@ -7,6 +7,7 @@ import { TemplateRenderer } from './templates.js';
 import { Worker } from './worker.js';
 import { TrackingStore } from './trackingStore.js';
 import { SuppressionList } from './suppressionList.js';
+import { CampaignStore } from './campaigns.js';
 import { injectTracking } from './tracking.js';
 import { startTrackingServer } from './trackingServer.js';
 import { logger } from './logger.js';
@@ -28,6 +29,7 @@ export function createEmailingSystem(overrides = {}) {
   const templates = new TemplateRenderer(config.templatesDir);
   const trackingStore = new TrackingStore(db);
   const suppressionList = new SuppressionList(db);
+  const campaignStore = new CampaignStore(db);
   const worker = new Worker(queue, smtpPool, suppressionList, config);
   let publicServer = null;
 
@@ -40,7 +42,7 @@ export function createEmailingSystem(overrides = {}) {
     };
   }
 
-  function sendEmail({ to, subject, html, text, from, priority = PRIORITY.NORMAL, maxAttempts }) {
+  function sendEmail({ to, subject, html, text, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId }) {
     if (suppressionList.isSuppressed(to)) {
       logger.warn('email_suppressed', { to });
       return null;
@@ -66,34 +68,38 @@ export function createEmailingSystem(overrides = {}) {
       maxAttempts,
       trackingId,
       headers,
+      campaignId,
     });
   }
 
-  function sendTemplate({ to, subject, template, variables, from, priority = PRIORITY.NORMAL, maxAttempts }) {
+  function sendTemplate({ to, subject, template, variables, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId }) {
     const html = templates.render(template, variables);
-    return sendEmail({ to, subject, html, from, priority, maxAttempts });
+    return sendEmail({ to, subject, html, from, priority, maxAttempts, campaignId });
   }
 
-  function sendBulk(recipients, { subject, template, html, from, priority = PRIORITY.NORMAL, maxAttempts }) {
+  function sendBulk(recipients, { subject, template, html, from, priority = PRIORITY.NORMAL, maxAttempts, campaignId, campaignName }) {
+    const effectiveCampaignId = campaignId ?? (campaignName ? campaignStore.create(campaignName) : undefined);
     return recipients.map((r) => {
       const variables = typeof r === 'string' ? {} : r.variables ?? {};
       const to = typeof r === 'string' ? r : r.to;
       if (template) {
-        return sendTemplate({ to, subject, template, variables, from, priority, maxAttempts });
+        return sendTemplate({ to, subject, template, variables, from, priority, maxAttempts, campaignId: effectiveCampaignId });
       }
-      return sendEmail({ to, subject, html, from, priority, maxAttempts });
+      return sendEmail({ to, subject, html, from, priority, maxAttempts, campaignId: effectiveCampaignId });
     });
   }
 
   async function start() {
     worker.start();
-    if ((config.tracking.enabled || config.unsubscribe.enabled) && !publicServer) {
-      publicServer = await startTrackingServer(trackingStore, suppressionList, config.publicServerPort);
+    const needsServer = config.tracking.enabled || config.unsubscribe.enabled || config.dashboard.enabled;
+    if (needsServer && !publicServer) {
+      publicServer = await startTrackingServer(trackingStore, suppressionList, campaignStore, config.publicServerPort);
     }
     logger.info('emailing_system_started', {
       servers: config.servers.map((s) => s.name),
       tracking: config.tracking.enabled,
       unsubscribe: config.unsubscribe.enabled,
+      dashboard: config.dashboard.enabled,
     });
   }
 
@@ -117,6 +123,9 @@ export function createEmailingSystem(overrides = {}) {
     trackingStats: () => trackingStore.campaignStats(),
     isSuppressed: (email) => suppressionList.isSuppressed(email),
     suppressionCount: () => suppressionList.count(),
-    _internal: { db, queue, smtpPool, templates, worker, trackingStore, suppressionList },
+    createCampaign: (name) => campaignStore.create(name),
+    listCampaigns: () => campaignStore.listWithStats(),
+    campaignStats: (campaignId) => campaignStore.stats(campaignId),
+    _internal: { db, queue, smtpPool, templates, worker, trackingStore, suppressionList, campaignStore },
   };
 }

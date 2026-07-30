@@ -61,5 +61,8 @@ export function loadConfig(overrides = {}) {
         'http://localhost:4000',
       mailto: overrides.unsubscribe?.mailto || process.env.UNSUBSCRIBE_MAILTO || undefined,
     },
+    dashboard: {
+      enabled: overrides.dashboard?.enabled ?? process.env.DASHBOARD_ENABLED === 'true',
+    },
   };
 }

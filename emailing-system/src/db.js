@@ -3,8 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS emails (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id INTEGER,
   tracking_id TEXT,
   to_address TEXT NOT NULL,
   from_address TEXT NOT NULL,
@@ -28,6 +35,7 @@ CREATE TABLE IF NOT EXISTS emails (
 );
 CREATE INDEX IF NOT EXISTS idx_emails_status_next ON emails (status, next_attempt_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_tracking_id ON emails (tracking_id);
+CREATE INDEX IF NOT EXISTS idx_emails_campaign_id ON emails (campaign_id);
 
 CREATE TABLE IF NOT EXISTS clicks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
